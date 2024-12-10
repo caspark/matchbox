@@ -431,19 +431,37 @@ async fn wait_for_ice_gathering_complete(conn: RtcPeerConnection) {
         return;
     }
 
-    let (mut tx, mut rx) = futures_channel::mpsc::channel(1);
+    let (mut tx1, mut rx) = futures_channel::mpsc::channel(1);
+    let mut tx2 = tx1.clone();
 
+    // Register callback to listen for Ice gathering to complete
     let conn_clone = conn.clone();
     let onstatechange: Box<dyn FnMut(JsValue)> = Box::new(move |_| {
         if conn_clone.ice_gathering_state() == RtcIceGatheringState::Complete {
-            tx.try_send(()).unwrap();
+            if let Err(_) = tx1.try_send(()) {
+                debug!("Ice gathering timeout elapsed before Ice gathering completed");
+            }
         }
     });
-
     let onstatechange = Closure::wrap(onstatechange);
-
     conn.set_onicegatheringstatechange(Some(onstatechange.as_ref().unchecked_ref()));
 
+    // Also register a timeout callback, since some stun servers can be really slow
+    let timeout_ms = 3000;
+    let timeout_callback = Closure::wrap(Box::new(move || {
+        if let Err(_) = tx2.try_send(()) {
+            debug!("Ice gathering timeout elapsed after Ice gathering completed");
+        }
+    }) as Box<dyn FnMut()>);
+    let window = web_sys::window().expect("should have a Window");
+    window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(
+            timeout_callback.as_ref().unchecked_ref(),
+            timeout_ms,
+        )
+        .expect("should be able to register timeout");
+
+    debug!("Waiting for Ice gathering to complete or {timeout_ms}ms timeout to elapse");
     rx.next().await;
 
     conn.set_onicegatheringstatechange(None);
