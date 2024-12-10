@@ -433,7 +433,9 @@ impl WebRtcSocket {
     pub fn id(&mut self) -> Option<PeerId> {
         if let Some(id) = self.id.get() {
             Some(*id)
-        } else if let Ok(Some(id)) = self.id_rx.try_recv() {
+        } else if let Ok(Some(id)) = {
+            self.id_rx.try_recv()
+        } {
             let id = self.id.get_or_init(|| id.into());
             Some(*id)
         } else {

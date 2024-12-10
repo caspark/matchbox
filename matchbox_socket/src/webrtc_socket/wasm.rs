@@ -37,6 +37,7 @@ impl Signaller for WasmSignaller {
             {
                 Ok((_, wss)) => break wss.fuse(),
                 Err(e) => {
+                    info!("Got a signalling error {e:?}");
                     if let Some(attempts) = attempts.as_mut() {
                         if *attempts <= 1 {
                             return Err(SignalingError::NegotiationFailed(Box::new(e)));

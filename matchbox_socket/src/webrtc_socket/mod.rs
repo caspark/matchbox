@@ -11,7 +11,7 @@ use futures::{future::Either, stream::FuturesUnordered, Future, FutureExt, Strea
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures_timer::Delay;
 use futures_util::select;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use matchbox_protocol::PeerId;
 use messages::*;
 pub(crate) use socket::MessageLoopChannels;
@@ -60,14 +60,14 @@ async fn signaling_loop<S: Signaller>(
         select! {
             request = requests_receiver.next().fuse() => {
                 let request = serde_json::to_string(&request).expect("serializing request");
-                debug!("-> {request}");
+                debug!("Sending to signaller: {request}");
                 signaller.send(request).await.map_err(SignalingError::from)?;
             }
 
             message = signaller.next_message().fuse() => {
                 match message {
                     Ok(message) => {
-                        debug!("Received {message}");
+                        debug!("Received from signaller: {message}");
                         let event: PeerEvent = serde_json::from_str(&message)
                             .unwrap_or_else(|err| panic!("couldn't parse peer event: {err}.\nEvent: {message}"));
                         events_sender.unbounded_send(event).map_err(SignalingError::from)?;
@@ -185,10 +185,11 @@ async fn message_loop<M: Messenger>(
 
             message = events_receiver.next().fuse() => {
                 if let Some(event) = message {
-                    debug!("{event:?}");
+                    debug!("Got message on event receiver: {event:?}");
                     match event {
                         PeerEvent::IdAssigned(peer_uuid) => {
                             if let Some(id_tx) = id_tx.take() {
+                                info!("matchbox peer id assigned: {peer_uuid}");
                                 if id_tx.send(peer_uuid.to_owned()).is_err() {
                                     // Socket receiver was dropped, exit cleanly.
                                     break Ok(());
@@ -199,18 +200,21 @@ async fn message_loop<M: Messenger>(
                             }
                         },
                         PeerEvent::NewPeer(peer_uuid) => {
+                            info!("matchbox new peer: {peer_uuid}");
                             let (signal_tx, signal_rx) = futures_channel::mpsc::unbounded();
                             handshake_signals.insert(peer_uuid, signal_tx);
                             let signal_peer = SignalPeer::new(peer_uuid, requests_sender.clone());
                             handshakes.push(M::offer_handshake(signal_peer, signal_rx, messages_from_peers_tx.clone(), ice_server_config, channel_configs))
                         },
                         PeerEvent::PeerLeft(peer_uuid) => {
+                            info!("matchbox peer left: {peer_uuid}");
                             if peer_state_tx.unbounded_send((peer_uuid, PeerState::Disconnected)).is_err() {
                                 // socket dropped, exit cleanly
                                 break Ok(());
                             }
                         },
                         PeerEvent::Signal { sender, data } => {
+                            info!("matchbox signal received from {sender:?}");
                             let signal_tx = handshake_signals.entry(sender).or_insert_with(|| {
                                 let (from_peer_tx, peer_signal_rx) = futures_channel::mpsc::unbounded();
                                 let signal_peer = SignalPeer::new(sender, requests_sender.clone());
