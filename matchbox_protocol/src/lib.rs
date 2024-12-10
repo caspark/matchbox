@@ -12,7 +12,12 @@ pub struct PeerId(pub Uuid);
 /// Requests go from peer to signaling server
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PeerRequest<S> {
-    Signal { receiver: PeerId, data: S },
+    Signal {
+        receiver: PeerId,
+        data: S,
+    },
+    /// Tell me my PeerID again
+    ResendPeerId,
     KeepAlive,
 }
 

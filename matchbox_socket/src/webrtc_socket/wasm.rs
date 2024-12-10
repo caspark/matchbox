@@ -1,4 +1,4 @@
-use super::{error::JsErrorExt, HandshakeResult, PacketSendError, PeerDataSender};
+use super::{error::JsErrorExt, HandshakeResult, PacketSendError, PeerDataSender, PeerRequest};
 use crate::webrtc_socket::{
     error::SignalingError, messages::PeerSignal, signal_peer::SignalPeer,
     socket::create_data_channels_ready_fut, ChannelConfig, Messenger, Packet, RtcIceServerConfig,
@@ -30,7 +30,7 @@ pub(crate) struct WasmSignaller {
 #[async_trait(?Send)]
 impl Signaller for WasmSignaller {
     async fn new(mut attempts: Option<u16>, room_url: &str) -> Result<Self, SignalingError> {
-        let websocket_stream = 'signaling: loop {
+        let mut websocket_stream = 'signaling: loop {
             match WsMeta::connect(room_url, None)
                 .await
                 .map_err(SignalingError::from)
@@ -54,6 +54,12 @@ impl Signaller for WasmSignaller {
                 }
             };
         };
+
+        // ask for our peer id, since it may have arrived before our event listener was registered
+        let request = serde_json::to_string(&PeerRequest::ResendPeerId)
+            .expect("serializing resend peerid request");
+        websocket_stream.send(WsMessage::Text(request)).await?;
+
         Ok(Self { websocket_stream })
     }
 
